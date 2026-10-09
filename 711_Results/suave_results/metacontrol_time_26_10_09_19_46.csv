@@ -1,0 +1,2 @@
+mission name,datetime,"initial pos (x,y)",mission duration (s),pipeline found,time searching pipeline (s),distance inspected (m),mean reaction time (s)
+time_constrained_mission metacontrol,09-Oct-2026-19-52-39,"(-17.0, 2.0)",301,True,62,69.72657012939453,1.4623543968
