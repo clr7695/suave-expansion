@@ -1,0 +1,37 @@
+---
+title: "Phase 1: battery drains and low battery is detected"
+---
+sequenceDiagram
+    autonumber 1
+    participant BM as battery_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt_extended manager<br/>(BatteryLevel)
+    participant MET as mission_metrics
+
+    Note over BM: Setup: battery_level starts at 1.0. Parameters are<br/>discharge_time (default 200 s) and<br/>qa_publishing_period (default 1 s).
+
+    MAV->>BM: mavros/state (mode == GUIDED)
+    Note right of BM: The battery only starts draining once the vehicle<br/>is in GUIDED mode, like the thruster events.
+
+    BM->>BM: start qa_publishing_period (1 s) timer, unsubscribe from state
+    Note right of BM: last_time is set to now. The state subscription<br/>is destroyed so the timer is only created once.
+
+    loop every qa_publishing_period
+        BM->>BM: battery_level -= dt / discharge_time (clamped at 0)
+        Note right of BM: Linear drain over time only. dt uses whole<br/>seconds. From full, 0.25 is reached after 150 s<br/>and 0 after 200 s.
+
+        BM->>DIAG: DiagnosticStatus OK, "QA status"<br/>battery_level = (current value)
+        Note right of BM: Reported as a quality attribute (QA), not a component.<br/>The status level is always OK, whatever the value.
+
+        par
+            DIAG->>BT: BatteryLevel::diagnostics_cb<br/>battery_level_ = value
+            Note right of BT: The condition stores the latest value. Until the<br/>first message arrives it holds -1, which counts as OK.
+        and
+            DIAG->>MET: check_battery()
+            Note left of MET: Compares each value with battery_limit<br/>(0.25 in mission_config.yaml).
+        end
+    end
+
+    MET->>MET: battery_level < battery_limit (0.25)<br/>record battery_low_time
+    Note left of MET: Only the first crossing below the limit is<br/>timestamped. This starts the battery<br/>reaction-time measurement.

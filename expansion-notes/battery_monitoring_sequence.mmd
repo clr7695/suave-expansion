@@ -1,0 +1,87 @@
+---
+title: SUAVE battery monitoring and adaptation (suave_bt_extended manager)
+---
+sequenceDiagram
+    autonumber
+    participant BM as battery_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt_extended manager<br/>(BatteryLevel, ChangeMode,<br/>RechargeBattery)
+    participant SM as system_modes<br/>(f_generate_search_path,<br/>f_follow_pipeline,<br/>generate_recharge_path)
+    participant RB as generate_recharge_path_node<br/>(RechargeBattery LC)
+    participant MET as mission_metrics
+
+    Note over BM: battery_level = 1.0, discharge_time = 200 s
+    MAV->>BM: mavros/state (mode == GUIDED)
+    BM->>BM: start qa_publishing_period (1 s) timer, unsubscribe from state
+
+    rect rgb(255, 235, 235)
+    Note over BM,MET: Battery drains and low battery is detected
+    loop every qa_publishing_period
+        BM->>BM: battery_level -= dt / discharge_time (clamped at 0)
+        BM->>DIAG: DiagnosticStatus OK, "QA status"<br/>battery_level = (current value)
+        par
+            DIAG->>BT: BatteryLevel::diagnostics_cb<br/>battery_level_ = value
+        and
+            DIAG->>MET: check_battery()
+        end
+    end
+    MET->>MET: battery_level < battery_limit (0.25)<br/>record battery_low_time
+    end
+
+    rect rgb(255, 245, 220)
+    Note over BT,MET: Manager adapts: switch to recharge
+    BT->>BT: tick: battery_level(threshold 0.25) → FAILURE<br/>halt search_pipeline / inspect_pipeline
+    BT->>SM: ChangeMode(f_generate_search_path, fd_unground)
+    BT->>SM: ChangeMode(f_follow_pipeline, fd_unground)
+    BT->>SM: ChangeMode(generate_recharge_path, normal)
+    SM->>RB: lifecycle transition → active
+    RB->>MET: /generate_recharge_path_node/transition_event (active)
+    MET->>MET: log battery drop reaction time
+    BT->>RB: get_state (verify ACTIVE)
+    RB-->>BT: PRIMARY_STATE_ACTIVE → ChangeMode SUCCESS
+    end
+
+    rect rgb(230, 245, 230)
+    Note over BM,RB: Vehicle goes to the station and recharges
+    alt use_action_server = false (legacy)
+        RB->>RB: on_activate() spawns recharge task
+        BT->>BT: recharge onLegacyStart → RUNNING<br/>(waits for recharge/complete)
+    else use_action_server = true
+        BT->>RB: RechargeBattery goal (/recharge_battery)
+        RB-->>BT: goal accepted (single-flight guard)
+    end
+    loop every 1 / recharge_retry_rate (0.5 s) until at station
+        RB->>MAV: /mavros/setpoint_position/local<br/>(station x, y, z = ground_depth + altitude)
+        MAV->>AP: SET_POSITION_TARGET → vehicle moves
+        MAV-->>RB: /mavros/local_position/pose
+        RB->>RB: is_xy_setpoint_reached(tolerance 0.5 m)?
+    end
+    RB->>BM: Trigger battery_monitor/recharge
+    BM->>BM: battery_level = 1.0
+    BM->>DIAG: DiagnosticStatus OK, "QA status"<br/>battery_level = 1.0
+    par
+        DIAG->>BT: BatteryLevel::diagnostics_cb<br/>battery_level_ = 1.0
+    and
+        DIAG->>MET: check_battery(): battery_low = false
+    end
+    BM->>BT: /battery_monitor/recharge/complete (true)<br/>(only read by the legacy BT node)
+    BM-->>RB: Trigger response success = true
+    alt use_action_server = false (legacy)
+        BT->>BT: recharge onLegacyRunning → SUCCESS
+    else use_action_server = true
+        RB-->>BT: result success = true (succeed)
+    end
+    end
+
+    rect rgb(225, 235, 250)
+    Note over BT,RB: Return to the mission
+    BT->>SM: ChangeMode(generate_recharge_path, inactive)
+    SM->>RB: lifecycle transition → inactive
+    BT->>RB: get_state (verify INACTIVE)
+    RB-->>BT: PRIMARY_STATE_INACTIVE
+    BT->>BT: next tick: battery_level → SUCCESS<br/>resume the interrupted search or inspect step
+    BT->>SM: ChangeMode(f_generate_search_path, fd_spiral_*)<br/>or ChangeMode(f_follow_pipeline, fd_follow_pipeline)
+    Note over BT: Battery keeps draining from 1.0, so the next drop below<br/>0.25 comes about 150 s after each recharge.
+    end

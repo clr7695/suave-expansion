@@ -1,0 +1,28 @@
+---
+title: "Phase 4: return to the mission"
+---
+sequenceDiagram
+    autonumber 34
+    participant BT as suave_bt_extended manager<br/>(BatteryLevel, ChangeMode)
+    participant SM as system_modes<br/>(f_generate_search_path,<br/>f_follow_pipeline,<br/>generate_recharge_path)
+    participant RB as generate_recharge_path_node<br/>(RechargeBattery LC)
+
+    BT->>SM: ChangeMode(generate_recharge_path, inactive)
+    Note right of BT: Last step of the recharge branch.
+
+    SM->>RB: lifecycle transition → inactive
+    Note right of SM: on_deactivate sets _deactivate_event and stops any<br/>legacy recharge task that is still running.
+
+    BT->>RB: get_state (verify INACTIVE)
+    Note right of BT: Same check as in phase 2, now expecting INACTIVE.
+
+    RB-->>BT: PRIMARY_STATE_INACTIVE
+    Note right of BT: The recharge branch succeeds, so the Fallback succeeds.
+
+    BT->>BT: next tick: battery_level → SUCCESS<br/>resume the interrupted search or inspect step
+    Note right of BT: SequenceWithMemory does not restart after a failure.<br/>It resumes the child that was interrupted (search or<br/>inspect), not the whole mission.
+
+    BT->>SM: ChangeMode(f_generate_search_path, fd_spiral_*)<br/>or ChangeMode(f_follow_pipeline, fd_follow_pipeline)
+    Note right of BT: Search restarts at the spiral altitude for the current<br/>water visibility. Inspection reactivates pipeline<br/>following.
+
+    Note over BT: Battery keeps draining from 1.0, so the next drop below<br/>0.25 comes about 150 s after each recharge.

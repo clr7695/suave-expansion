@@ -1,0 +1,36 @@
+---
+title: "Phase 2: manager adapts by switching to recharge"
+---
+sequenceDiagram
+    autonumber 8
+    participant BT as suave_bt_extended manager<br/>(BatteryLevel, ChangeMode)
+    participant SM as system_modes<br/>(f_generate_search_path,<br/>f_follow_pipeline,<br/>generate_recharge_path)
+    participant RB as generate_recharge_path_node<br/>(RechargeBattery LC)
+    participant MET as mission_metrics
+
+    BT->>BT: tick: battery_level(threshold 0.25) → FAILURE<br/>halt search_pipeline / inspect_pipeline
+    Note right of BT: battery_level guards both the search and the inspect<br/>ReactiveSequence, so it is checked on every tick (100 ms).<br/>Below 0.25 the running step is halted (in action mode,<br/>its goal is cancelled) and the Fallback takes the<br/>recharge branch.
+
+    BT->>SM: ChangeMode(f_generate_search_path, fd_unground)
+    Note right of BT: Stops the spiral search node.
+
+    BT->>SM: ChangeMode(f_follow_pipeline, fd_unground)
+    Note right of BT: Stops the pipeline-following node. Each ChangeMode<br/>also confirms the node state with get_state<br/>(not shown for these two).
+
+    BT->>SM: ChangeMode(generate_recharge_path, normal)
+    Note right of BT: suave_modes.yaml maps "normal" to<br/>generate_recharge_path_node = active.
+
+    SM->>RB: lifecycle transition → active
+    Note right of SM: system_modes moves the recharge node to active.
+
+    RB->>MET: /generate_recharge_path_node/transition_event (active)
+    Note right of RB: Activation is published like any lifecycle change.
+
+    MET->>MET: log battery drop reaction time
+    Note left of MET: reaction time = activation time − battery_low_time.
+
+    BT->>RB: get_state (verify ACTIVE)
+    Note right of BT: ChangeMode polls the node's real state because<br/>system_modes can acknowledge without applying.
+
+    RB-->>BT: PRIMARY_STATE_ACTIVE → ChangeMode SUCCESS
+    Note right of BT: The recharge branch moves on to its recharge step.

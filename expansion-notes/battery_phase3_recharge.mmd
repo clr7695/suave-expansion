@@ -1,0 +1,66 @@
+---
+title: "Phase 3: vehicle goes to the station and recharges"
+---
+sequenceDiagram
+    autonumber 17
+    participant BM as battery_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt_extended manager<br/>(BatteryLevel, RechargeBattery)
+    participant RB as generate_recharge_path_node<br/>(RechargeBattery LC)
+    participant MET as mission_metrics
+
+    alt use_action_server = false (legacy)
+        RB->>RB: on_activate() spawns recharge task
+        Note right of RB: Legacy mode: activating the node starts the work.
+        BT->>BT: recharge onLegacyStart → RUNNING<br/>(waits for recharge/complete)
+        Note right of BT: The BT node clears its recharged_ flag and stays<br/>RUNNING until /battery_monitor/recharge/complete<br/>arrives or the mission time limit is reached.
+    else use_action_server = true
+        BT->>RB: RechargeBattery goal (/recharge_battery)
+        Note right of BT: Action mode: the goal is empty. The BT node<br/>stays RUNNING until a result arrives.
+        RB-->>BT: goal accepted (single-flight guard)
+        Note right of RB: _goal_executing rejects a second goal<br/>while one is already running.
+    end
+
+    loop every 1 / recharge_retry_rate (0.5 s) until at station
+        RB->>MAV: /mavros/setpoint_position/local<br/>(station x, y, z = ground_depth + altitude)
+        Note right of MAV: The station defaults to x = -3, y = -2. z is computed as<br/>ground_depth_gz (-20) + altitude (1.25) = -18.75.<br/>The station's own z value (-19.5) is not used.
+        MAV->>AP: SET_POSITION_TARGET → vehicle moves
+        Note right of MAV: ArduSub flies straight to the setpoint in GUIDED mode.
+        MAV-->>RB: /mavros/local_position/pose
+        Note right of RB: Already in the Gazebo frame, so no conversion<br/>is needed.
+        RB->>RB: is_xy_setpoint_reached(tolerance 0.5 m)?
+        Note right of RB: Only x and y are checked. The loop also stops on<br/>goal cancel or deactivation.
+    end
+
+    RB->>BM: Trigger battery_monitor/recharge
+    Note right of BM: Bounded wait (call_service_with_timeout).
+
+    BM->>BM: battery_level = 1.0
+    Note right of BM: Recharging is instant.
+
+    BM->>DIAG: DiagnosticStatus OK, "QA status"<br/>battery_level = 1.0
+    Note right of BM: The new level is published immediately,<br/>outside the regular timer.
+
+    par
+        DIAG->>BT: BatteryLevel::diagnostics_cb<br/>battery_level_ = 1.0
+        Note right of BT: The next battery_level tick will succeed.
+    and
+        DIAG->>MET: check_battery(): battery_low = false
+        Note left of MET: The value is above the limit, so a later<br/>drop will be timed again.
+    end
+
+    BM->>BT: /battery_monitor/recharge/complete (true)<br/>(only read by the legacy BT node)
+    Note right of BM: A separate std_msgs/Bool topic, used as the<br/>legacy completion signal.
+
+    BM-->>RB: Trigger response success = true
+    Note right of RB: The recharge routine returns True.
+
+    alt use_action_server = false (legacy)
+        BT->>BT: recharge onLegacyRunning → SUCCESS
+        Note right of BT: Seen on the next tick once recharged_ is true.<br/>The node's legacy task ends, but the node stays active.
+    else use_action_server = true
+        RB-->>BT: result success = true (succeed)
+        Note right of BT: succeed on success, abort on a failed Trigger or<br/>deactivation, canceled on client cancel. Only<br/>SUCCEEDED with success is SUCCESS.
+    end
