@@ -1,0 +1,33 @@
+---
+title: "Phase 2: manager adapts by switching to the recovery mode"
+---
+sequenceDiagram
+    autonumber 9
+    participant BT as suave_bt manager<br/>(ThrustersOk, ChangeMode)
+    participant SM as system_modes<br/>(f_maintain_motion)
+    participant MM as f_maintain_motion_node<br/>(RecoverThrustersLC)
+    participant MET as mission_metrics
+
+    BT->>BT: tick: thrusters_ok → FAILURE<br/>(Fallback takes recovery branch)
+    Note right of BT: The ReactiveSequence re-evaluates thrusters_ok<br/>on every tick, so a failure preempts the running<br/>search or inspect step right away.
+
+    BT->>SM: ChangeMode(fd_recover_thrusters)<br/>/f_maintain_motion/change_mode
+    Note right of BT: The manager only picks a mode. It never touches<br/>the thrusters itself. This is the standard managing-<br/>subsystem interface.
+
+    SM-->>BT: success (acknowledged)
+    Note right of SM: This only means the request was accepted.<br/>The lifecycle change may still be pending.
+
+    SM->>MM: lifecycle transition → active
+    Note right of SM: suave_modes.yaml maps fd_recover_thrusters<br/>to f_maintain_motion_node = active.
+
+    MM->>MET: /f_maintain_motion_node/transition_event (active)
+    Note right of MM: Activation is published like any lifecycle change.
+
+    MET->>MET: log thruster failure reaction time
+    Note left of MET: reaction time = activation time − failure time.<br/>The failed flag is then reset for the next event.
+
+    BT->>MM: get_state (verify ACTIVE)
+    Note right of BT: ChangeMode polls the node's real state because<br/>system_modes can acknowledge without applying.
+
+    MM-->>BT: PRIMARY_STATE_ACTIVE → ChangeMode SUCCESS
+    Note right of BT: The mode is stored in previous_modes, so later<br/>ticks skip the service call if the state still matches.

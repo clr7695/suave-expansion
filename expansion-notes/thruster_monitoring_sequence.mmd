@@ -1,0 +1,77 @@
+---
+title: SUAVE thruster monitoring and adaptation (BehaviorTree manager)
+---
+sequenceDiagram
+    autonumber
+    participant TM as thruster_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt manager<br/>(ThrustersOk, ChangeMode,<br/>RecoverThrusters)
+    participant SM as system_modes<br/>(f_maintain_motion)
+    participant MM as f_maintain_motion_node<br/>(RecoverThrustersLC)
+    participant MET as mission_metrics
+
+    Note over TM: thruster_events from mission_config.yaml<br/>e.g. (1, failure, 35)
+    MAV->>TM: mavros/state (mode == GUIDED)
+    TM->>TM: start 1 Hz event timer, unsubscribe from state
+
+    rect rgb(255, 235, 235)
+    Note over TM,MET: Thruster failure is injected and detected
+    loop every 1 s until next event delay has elapsed
+        TM->>TM: thruster_event_cb()
+    end
+    TM->>MAV: SetParameters SERVO{N}_FUNCTION = 0<br/>(mavros/param/set_parameters)
+    MAV->>AP: PARAM_SET → thruster N disabled
+    TM->>DIAG: DiagnosticStatus ERROR, "Component status"<br/>c_thruster_N = FALSE / ERROR
+    par
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_N] = false
+    and
+        DIAG->>MET: diagnostics_cb: record thrusters_failed_time
+    end
+    end
+
+    rect rgb(255, 245, 220)
+    Note over BT,MET: Manager adapts: switch to recovery mode
+    BT->>BT: tick: thrusters_ok → FAILURE<br/>(Fallback takes recovery branch)
+    BT->>SM: ChangeMode(fd_recover_thrusters)<br/>/f_maintain_motion/change_mode
+    SM-->>BT: success (acknowledged)
+    SM->>MM: lifecycle transition → active
+    MM->>MET: /f_maintain_motion_node/transition_event (active)
+    MET->>MET: log thruster failure reaction time
+    BT->>MM: get_state (verify ACTIVE)
+    MM-->>BT: PRIMARY_STATE_ACTIVE → ChangeMode SUCCESS
+    end
+
+    rect rgb(230, 245, 230)
+    Note over BT,AP: Thrusters are recovered
+    alt use_action_server = false (legacy)
+        MM->>MM: on_activate() spawns recovery task
+        BT->>BT: recover_thrusters onLegacyStart → SUCCESS
+    else use_action_server = true
+        BT->>MM: RecoverThrusters goal (/recover_thrusters)
+        MM-->>BT: goal accepted (single-flight guard)
+    end
+    MM->>MM: wait 10 s (interruptible by cancel / deactivate)
+    loop thruster i = 1..6
+        MM->>MAV: SetParameters SERVO{i}_FUNCTION = i + 32
+        MAV->>AP: PARAM_SET → thruster i re-enabled
+        MAV-->>MM: SetParameters response (successful?)
+        MM->>DIAG: DiagnosticStatus OK, "Component status"<br/>c_thruster_i = RECOVERED
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_i] = true
+        MM->>MM: wait 0.25 s
+    end
+    opt use_action_server = true
+        MM-->>BT: result success = all writes OK<br/>(succeed / abort / canceled)
+    end
+    end
+
+    rect rgb(225, 235, 250)
+    Note over BT,MM: Return to nominal mode
+    BT->>BT: tick: thrusters_ok → SUCCESS
+    BT->>SM: ChangeMode(fd_all_thrusters)
+    SM->>MM: lifecycle transition → inactive
+    BT->>MM: get_state (verify INACTIVE)
+    MM-->>BT: PRIMARY_STATE_INACTIVE
+    Note over BT: Mission continues (search / inspect pipeline).<br/>ReactiveSequence re-checks thrusters_ok every tick.
+    end

@@ -1,0 +1,131 @@
+---
+title: SUAVE thruster monitoring and adaptation (BehaviorTree manager), annotated
+---
+sequenceDiagram
+    autonumber
+    participant TM as thruster_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt manager<br/>(ThrustersOk, ChangeMode,<br/>RecoverThrusters)
+    participant SM as system_modes<br/>(f_maintain_motion)
+    participant MM as f_maintain_motion_node<br/>(RecoverThrustersLC)
+    participant MET as mission_metrics
+
+    Note over TM: Setup: thruster_events are read from mission_config.yaml<br/>as (thruster, failure|recovery, delay s), e.g. (1, failure, 35).<br/>The runner can shift delays randomly per run.
+
+    MAV->>TM: mavros/state (mode == GUIDED)
+    Note right of TM: Events must not fire before the vehicle is flying,<br/>so the monitor waits for ArduSub to enter GUIDED mode.
+
+    TM->>TM: start 1 Hz event timer, unsubscribe from state
+    Note right of TM: The event clock starts now. The state subscription<br/>is destroyed so the timer is only created once.
+
+    rect rgb(255, 235, 235)
+    Note over TM,MET: Phase 1: thruster failure is injected and detected
+    loop every 1 s until next event delay has elapsed
+        TM->>TM: thruster_event_cb()
+        Note right of TM: Compares seconds since the last event<br/>with the next event's configured delay.
+    end
+
+    TM->>MAV: SetParameters SERVO{N}_FUNCTION = 0<br/>(mavros/param/set_parameters)
+    Note right of TM: Setting the servo function to 0 (Disabled) unmaps<br/>the output from its motor. This is how the failure<br/>is simulated. The call is async and not checked.
+
+    MAV->>AP: PARAM_SET → thruster N disabled
+    Note right of MAV: MAVROS forwards the parameter over MAVLink.<br/>ArduSub stops driving thruster N, so the<br/>vehicle loses some control authority.
+
+    TM->>DIAG: DiagnosticStatus ERROR, "Component status"<br/>c_thruster_N = FALSE / ERROR
+    Note right of TM: The monitor reports the failure itself. Two values<br/>are sent (FALSE and the alias ERROR) for backward<br/>compatibility with older managers.
+
+    par
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_N] = false
+        Note right of BT: The condition caches one flag per thruster.<br/>Any value other than RECOVERED counts as failed.
+    and
+        DIAG->>MET: diagnostics_cb: record thrusters_failed_time
+        Note left of MET: Only the first failure is timestamped.<br/>This is the start of the reaction-time metric.
+    end
+    end
+
+    rect rgb(255, 245, 220)
+    Note over BT,MET: Phase 2: manager adapts by switching to the recovery mode
+    BT->>BT: tick: thrusters_ok → FAILURE<br/>(Fallback takes recovery branch)
+    Note right of BT: The ReactiveSequence re-evaluates thrusters_ok<br/>on every tick, so a failure preempts the running<br/>search or inspect step right away.
+
+    BT->>SM: ChangeMode(fd_recover_thrusters)<br/>/f_maintain_motion/change_mode
+    Note right of BT: The manager only picks a mode. It never touches<br/>the thrusters itself. This is the standard managing-<br/>subsystem interface.
+
+    SM-->>BT: success (acknowledged)
+    Note right of SM: This only means the request was accepted.<br/>The lifecycle change may still be pending.
+
+    SM->>MM: lifecycle transition → active
+    Note right of SM: suave_modes.yaml maps fd_recover_thrusters<br/>to f_maintain_motion_node = active.
+
+    MM->>MET: /f_maintain_motion_node/transition_event (active)
+    Note right of MM: Activation is published like any lifecycle change.
+
+    MET->>MET: log thruster failure reaction time
+    Note left of MET: reaction time = activation time − failure time.<br/>The failed flag is then reset for the next event.
+
+    BT->>MM: get_state (verify ACTIVE)
+    Note right of BT: ChangeMode polls the node's real state because<br/>system_modes can acknowledge without applying.
+
+    MM-->>BT: PRIMARY_STATE_ACTIVE → ChangeMode SUCCESS
+    Note right of BT: The mode is stored in previous_modes, so later<br/>ticks skip the service call if the state still matches.
+    end
+
+    rect rgb(230, 245, 230)
+    Note over BT,AP: Phase 3: thrusters are recovered
+    alt use_action_server = false (legacy)
+        MM->>MM: on_activate() spawns recovery task
+        Note right of MM: Legacy mode: activating the node starts the work.
+        BT->>BT: recover_thrusters onLegacyStart → SUCCESS
+        Note right of BT: The BT node succeeds at once. Progress is seen<br/>only through /diagnostics updates.
+    else use_action_server = true
+        BT->>MM: RecoverThrusters goal (/recover_thrusters)
+        Note right of BT: Action mode: the node waits for a goal, and the<br/>BT node stays RUNNING until a result arrives.
+        MM-->>BT: goal accepted (single-flight guard)
+        Note right of MM: _goal_executing rejects a second goal<br/>while one is already running.
+    end
+
+    MM->>MM: wait 10 s (interruptible by cancel / deactivate)
+    Note right of MM: Simulates the time a real recovery takes.<br/>It returns early if the goal is canceled or<br/>the node is deactivated (_abort_event).
+
+    loop thruster i = 1..6
+        MM->>MAV: SetParameters SERVO{i}_FUNCTION = i + 32
+        Note right of MAV: Function 33..38 = Motor1..Motor6 restores the<br/>normal motor mapping. All six are reset, because<br/>the node doesn't track which one failed.
+        MAV->>AP: PARAM_SET → thruster i re-enabled
+        Note right of MAV: ArduSub drives thruster i again.
+        MAV-->>MM: SetParameters response (successful?)
+        Note right of MM: Bounded wait (call_service_with_timeout).<br/>No response or a rejection marks this thruster<br/>failed, and the loop moves on.
+        MM->>DIAG: DiagnosticStatus OK, "Component status"<br/>c_thruster_i = RECOVERED
+        Note right of MM: Published only after a confirmed write.
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_i] = true
+        Note right of BT: The flag for thruster i is set back to OK.
+        MM->>MM: wait 0.25 s
+        Note right of MM: Short pause between writes (also interruptible).
+    end
+
+    opt use_action_server = true
+        MM-->>BT: result success = all writes OK<br/>(succeed / abort / canceled)
+        Note right of BT: succeed if all six writes worked, abort on a<br/>failed write or deactivation, canceled on client<br/>cancel. Only SUCCEEDED with success is SUCCESS.
+    end
+    end
+
+    rect rgb(225, 235, 250)
+    Note over BT,MM: Phase 4: return to the normal mode
+    BT->>BT: tick: thrusters_ok → SUCCESS
+    Note right of BT: All six flags are true again, so the Fallback<br/>takes the nominal branch.
+
+    BT->>SM: ChangeMode(fd_all_thrusters)
+    Note right of BT: The normal mode, where no recovery work is needed.
+
+    SM->>MM: lifecycle transition → inactive
+    Note right of SM: fd_all_thrusters maps f_maintain_motion_node<br/>to inactive. on_deactivate sets _abort_event.
+
+    BT->>MM: get_state (verify INACTIVE)
+    Note right of BT: Same check as before, now expecting INACTIVE.
+
+    MM-->>BT: PRIMARY_STATE_INACTIVE
+    Note right of BT: The mode change is confirmed.
+
+    Note over BT: Mission continues (search / inspect pipeline).<br/>ReactiveSequence re-checks thrusters_ok every tick,<br/>so any later failure repeats phases 1–4.
+    end

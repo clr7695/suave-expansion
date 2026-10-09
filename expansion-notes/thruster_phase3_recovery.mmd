@@ -1,0 +1,45 @@
+---
+title: "Phase 3: thrusters are recovered"
+---
+sequenceDiagram
+    autonumber 17
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt manager<br/>(ThrustersOk, RecoverThrusters)
+    participant MM as f_maintain_motion_node<br/>(RecoverThrustersLC)
+
+    alt use_action_server = false (legacy)
+        MM->>MM: on_activate() spawns recovery task
+        Note right of MM: Legacy mode: activating the node starts the work.
+        BT->>BT: recover_thrusters onLegacyStart → SUCCESS
+        Note right of BT: The BT node succeeds at once. Progress is seen<br/>only through /diagnostics updates.
+    else use_action_server = true
+        BT->>MM: RecoverThrusters goal (/recover_thrusters)
+        Note right of BT: Action mode: the node waits for a goal, and the<br/>BT node stays RUNNING until a result arrives.
+        MM-->>BT: goal accepted (single-flight guard)
+        Note right of MM: _goal_executing rejects a second goal<br/>while one is already running.
+    end
+
+    MM->>MM: wait 10 s (interruptible by cancel / deactivate)
+    Note right of MM: Simulates the time a real recovery takes.<br/>It returns early if the goal is canceled or<br/>the node is deactivated (_abort_event).
+
+    loop thruster i = 1..6
+        MM->>MAV: SetParameters SERVO{i}_FUNCTION = i + 32
+        Note right of MAV: Function 33..38 = Motor1..Motor6 restores the<br/>normal motor mapping. All six are reset, because<br/>the node doesn't track which one failed.
+        MAV->>AP: PARAM_SET → thruster i re-enabled
+        Note right of MAV: ArduSub drives thruster i again.
+        MAV-->>MM: SetParameters response (successful?)
+        Note right of MM: Bounded wait (call_service_with_timeout).<br/>No response or a rejection marks this thruster<br/>failed, and the loop moves on.
+        MM->>DIAG: DiagnosticStatus OK, "Component status"<br/>c_thruster_i = RECOVERED
+        Note right of MM: Published only after a confirmed write.
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_i] = true
+        Note right of BT: The flag for thruster i is set back to OK.
+        MM->>MM: wait 0.25 s
+        Note right of MM: Short pause between writes (also interruptible).
+    end
+
+    opt use_action_server = true
+        MM-->>BT: result success = all writes OK<br/>(succeed / abort / canceled)
+        Note right of BT: succeed if all six writes worked, abort on a<br/>failed write or deactivation, canceled on client<br/>cancel. Only SUCCEEDED with success is SUCCESS.
+    end

@@ -1,0 +1,25 @@
+---
+title: "Phase 4: return to the normal mode"
+---
+sequenceDiagram
+    autonumber 29
+    participant BT as suave_bt manager<br/>(ThrustersOk, ChangeMode)
+    participant SM as system_modes<br/>(f_maintain_motion)
+    participant MM as f_maintain_motion_node<br/>(RecoverThrustersLC)
+
+    BT->>BT: tick: thrusters_ok → SUCCESS
+    Note right of BT: All six flags are true again, so the Fallback<br/>takes the nominal branch.
+
+    BT->>SM: ChangeMode(fd_all_thrusters)
+    Note right of BT: The normal mode, where no recovery work is needed.
+
+    SM->>MM: lifecycle transition → inactive
+    Note right of SM: fd_all_thrusters maps f_maintain_motion_node<br/>to inactive. on_deactivate sets _abort_event.
+
+    BT->>MM: get_state (verify INACTIVE)
+    Note right of BT: Same check as before, now expecting INACTIVE.
+
+    MM-->>BT: PRIMARY_STATE_INACTIVE
+    Note right of BT: The mode change is confirmed.
+
+    Note over BT: Mission continues (search / inspect pipeline).<br/>ReactiveSequence re-checks thrusters_ok every tick,<br/>so any later failure repeats phases 1–4.

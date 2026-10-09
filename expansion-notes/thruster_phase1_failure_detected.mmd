@@ -1,0 +1,41 @@
+---
+title: "Phase 1: thruster failure is injected and detected"
+---
+sequenceDiagram
+    autonumber 1
+    participant TM as thruster_monitor<br/>(suave_monitor)
+    participant MAV as MAVROS
+    participant AP as ArduSub SITL
+    participant DIAG as /diagnostics<br/>(topic)
+    participant BT as suave_bt manager<br/>(ThrustersOk)
+    participant MET as mission_metrics
+
+    Note over TM: Setup: thruster_events are read from mission_config.yaml<br/>as (thruster, failure|recovery, delay s), e.g. (1, failure, 35).<br/>The runner can shift delays randomly per run.
+
+    MAV->>TM: mavros/state (mode == GUIDED)
+    Note right of TM: Events must not fire before the vehicle is flying,<br/>so the monitor waits for ArduSub to enter GUIDED mode.
+
+    TM->>TM: start 1 Hz event timer, unsubscribe from state
+    Note right of TM: The event clock starts now. The state subscription<br/>is destroyed so the timer is only created once.
+
+    loop every 1 s until next event delay has elapsed
+        TM->>TM: thruster_event_cb()
+        Note right of TM: Compares seconds since the last event<br/>with the next event's configured delay.
+    end
+
+    TM->>MAV: SetParameters SERVO{N}_FUNCTION = 0<br/>(mavros/param/set_parameters)
+    Note right of TM: Setting the servo function to 0 (Disabled) unmaps<br/>the output from its motor. This is how the failure<br/>is simulated. The call is async and not checked.
+
+    MAV->>AP: PARAM_SET → thruster N disabled
+    Note right of MAV: MAVROS forwards the parameter over MAVLink.<br/>ArduSub stops driving thruster N, so the<br/>vehicle loses some control authority.
+
+    TM->>DIAG: DiagnosticStatus ERROR, "Component status"<br/>c_thruster_N = FALSE / ERROR
+    Note right of TM: The monitor reports the failure itself. Two values<br/>are sent (FALSE and the alias ERROR) for backward<br/>compatibility with older managers.
+
+    par
+        DIAG->>BT: ThrustersOk::diagnostics_cb<br/>thrusters_ok_[c_thruster_N] = false
+        Note right of BT: The condition caches one flag per thruster.<br/>Any value other than RECOVERED counts as failed.
+    and
+        DIAG->>MET: diagnostics_cb: record thrusters_failed_time
+        Note left of MET: Only the first failure is timestamped.<br/>This is the start of the reaction-time metric.
+    end
