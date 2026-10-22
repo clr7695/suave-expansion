@@ -41,6 +41,20 @@
                   <battery_level threshold="0.25"/>
                   <Fallback>
                     <Sequence>
+                      <Inverter>
+                        <battery_level threshold="0.40"/>
+                      </Inverter>
+                      <change_mode node_name="f_generate_search_path"
+                                   mode_name="fd_spiral_high"/>
+                    </Sequence>
+                    <Sequence>
+                      <Inverter>
+                        <battery_level threshold="0.60"/>
+                      </Inverter>
+                      <change_mode node_name="f_generate_search_path"
+                                   mode_name="fd_spiral_medium"/>
+                    </Sequence>
+                    <Sequence>
                       <water_visibility threshold="3.25"/>
                       <change_mode node_name="f_generate_search_path"
                                    mode_name="fd_spiral_high"/>
