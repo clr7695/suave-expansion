@@ -48,6 +48,7 @@ add_library(is_pipeline_inspected SHARED src/suave_bt/is_pipeline_inspected.cpp)
 add_library(condition_water_visibility SHARED src/suave_bt/condition_water_visibility.cpp)
 add_library(condition_thrusters_ok SHARED src/suave_bt/condition_thrusters_ok.cpp)
 add_library(condition_battery_level SHARED src/suave_bt/condition_battery_level.cpp)
+add_library(condition_battery_below SHARED src/suave_bt/condition_battery_below.cpp)
 
 add_library(action_arm_thrusters SHARED src/suave_bt/action_arm_thrusters.cpp)
 add_library(action_set_guided_mode SHARED src/suave_bt/action_set_guided_mode.cpp)
@@ -65,6 +66,7 @@ list(APPEND plugin_libs
   condition_water_visibility
   condition_thrusters_ok
   condition_battery_level
+  condition_battery_below
   action_arm_thrusters
   action_set_guided_mode
   action_search_pipeline

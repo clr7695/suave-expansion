@@ -41,16 +41,12 @@
                   <battery_level threshold="0.25"/>
                   <Fallback>
                     <Sequence>
-                      <Inverter>
-                        <battery_level threshold="0.40"/>
-                      </Inverter>
+                      <battery_below threshold="0.40"/>
                       <change_mode node_name="f_generate_search_path"
                                    mode_name="fd_spiral_high"/>
                     </Sequence>
                     <Sequence>
-                      <Inverter>
-                        <battery_level threshold="0.60"/>
-                      </Inverter>
+                      <battery_below threshold="0.60"/>
                       <change_mode node_name="f_generate_search_path"
                                    mode_name="fd_spiral_medium"/>
                     </Sequence>
@@ -112,6 +108,10 @@
     <Action ID="arm_thrusters"
             editable="true"/>
     <Condition ID="battery_level"
+               editable="true">
+      <input_port name="threshold"/>
+    </Condition>
+    <Condition ID="battery_below"
                editable="true">
       <input_port name="threshold"/>
     </Condition>

@@ -32,6 +32,7 @@
 #include "suave_bt/condition_water_visibility.hpp"
 #include "suave_bt/condition_thrusters_ok.hpp"
 #include "suave_bt/condition_battery_level.hpp"
+#include "suave_bt/condition_battery_below.hpp"
 
 #include "suave_bt/action_arm_thrusters.hpp"
 #include "suave_bt/action_set_guided_mode.hpp"
@@ -63,6 +64,7 @@ int main(int argc, char * argv[])
   factory.registerNodeType<suave_bt::WaterVisibility>("water_visibility");
   factory.registerNodeType<suave_bt::ThrustersOk>("thrusters_ok");
   factory.registerNodeType<suave_bt::BatteryLevel>("battery_level");
+  factory.registerNodeType<suave_bt::BatteryBelow>("battery_below");
 
   factory.registerNodeType<suave_bt::IsPipelineFound>("is_pipeline_found");
   factory.registerNodeType<suave_bt::IsPipelineInspected>("is_pipeline_inspected");
