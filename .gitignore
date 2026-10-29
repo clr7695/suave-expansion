@@ -154,3 +154,5 @@ dmypy.json
 **/.pytest_cache/
 
 results/
+runner/
+log/

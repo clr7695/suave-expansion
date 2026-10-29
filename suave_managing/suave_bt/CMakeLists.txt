@@ -56,6 +56,8 @@ add_library(action_inspect_pipeline SHARED src/suave_bt/action_inspect_pipeline.
 add_library(action_recharge_battery SHARED src/suave_bt/action_recharge_battery.cpp)
 add_library(action_recover_thrusters SHARED src/suave_bt/action_recover_thrusters.cpp)
 add_library(action_change_mode SHARED src/suave_bt/action_change_mode.cpp)
+add_library(action_change_alt SHARED src/suave_bt/action_change_alt.cpp)
+
 
 
 list(APPEND plugin_libs
@@ -72,6 +74,7 @@ list(APPEND plugin_libs
   action_recharge_battery
   action_recover_thrusters
   action_change_mode
+  action_change_alt
 )
 
 foreach(bt_plugin ${plugin_libs})
