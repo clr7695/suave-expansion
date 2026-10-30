@@ -8,5 +8,5 @@ Build dev image:
 Run dev image: 
     docker run -it --shm-size=512m -v ./711_Results/suave_results:/home/kasm-user/suave/results -p 6901:6901 -e VNC_PW=password --security-opt seccomp=unconfined suave:dev
 
-In dev image: 
+In dev image (http://localhost:6901): 
     ./runner.sh false bt extended 2
