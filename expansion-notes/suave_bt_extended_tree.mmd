@@ -1,0 +1,76 @@
+---
+title: "suave_extended.xml behavior tree (? fallback, → sequence, * with memory, ⟳ reactive; rounded = condition)"
+---
+flowchart TD
+    R["🔁 RetryUntilSuccessful (num_attempts = -1)"] --> RF{{"? ReactiveFallback"}}
+
+    %% Abort branch
+    RF --> ABORT["→ Sequence: abort"]
+    ABORT --> A0(["is_mission_aborted"])
+    ABORT --> A1["→ Sequence"]
+    A1 --> A2["change_mode<br/>f_maintain_motion → fd_unground"]
+    A1 --> A3["change_mode<br/>f_generate_search_path → fd_unground"]
+    A1 --> A4["change_mode<br/>f_follow_pipeline → fd_unground"]
+    A1 --> A5["change_mode<br/>generate_recharge_path → inactive"]
+
+    %% Mission branch
+    RF --> MISSION["→* SequenceWithMemory: mission"]
+    MISSION --> SETUP["→* SequenceWithMemory: setup"]
+    SETUP --> SU1["arm_thrusters"]
+    SETUP --> SU2["set_guided_mode"]
+
+    MISSION --> RS["⟳→ ReactiveSequence"]
+
+    %% Thruster guard
+    RS --> TF{{"? Fallback: thrusters"}}
+    TF --> T1["→ Sequence"]
+    T1 --> T1a(["thrusters_ok"])
+    T1 --> T1b["change_mode<br/>f_maintain_motion → fd_all_thrusters"]
+    TF --> T2["→ Sequence"]
+    T2 --> T2a["change_mode<br/>f_maintain_motion → fd_recover_thrusters"]
+    T2 --> T2b["recover_thrusters"]
+
+    %% Battery fallback: tasks or recharge
+    RS --> BF{{"? Fallback: battery"}}
+    BF --> TASKS["→* SequenceWithMemory: tasks"]
+
+    TASKS --> SEARCH["⟳→ ReactiveSequence: search"]
+    SEARCH --> SB(["battery_level ≥ 0.25"])
+    SEARCH --> VF{{"? Fallback: spiral altitude"}}
+    VF --> V1["→ Sequence"]
+    V1 --> V1a(["water_visibility ≥ 3.25"])
+    V1 --> V1b["change_mode<br/>f_generate_search_path → fd_spiral_high"]
+    VF --> V2["→ Sequence"]
+    V2 --> V2a(["water_visibility ≥ 2.25"])
+    V2 --> V2b["change_mode<br/>f_generate_search_path → fd_spiral_medium"]
+    VF --> V3["→ Sequence"]
+    V3 --> V3a(["water_visibility ≥ 1.25"])
+    V3 --> V3b["change_mode<br/>f_generate_search_path → fd_spiral_low"]
+    SEARCH --> S1["search_pipeline"]
+    SEARCH --> S2["change_mode<br/>f_generate_search_path → fd_unground"]
+
+    TASKS --> INSPECT["⟳→ ReactiveSequence: inspect"]
+    INSPECT --> IB(["battery_level ≥ 0.25"])
+    INSPECT --> P1["change_mode<br/>f_follow_pipeline → fd_follow_pipeline"]
+    INSPECT --> P2["inspect_pipeline"]
+    INSPECT --> P3["change_mode<br/>f_follow_pipeline → fd_unground"]
+    INSPECT --> P4["change_mode<br/>f_maintain_motion → fd_unground"]
+
+    BF --> RECH["→ Sequence: recharge"]
+    RECH --> RC1["change_mode<br/>f_generate_search_path → fd_unground"]
+    RECH --> RC2["change_mode<br/>f_follow_pipeline → fd_unground"]
+    RECH --> RC3["change_mode<br/>generate_recharge_path → normal"]
+    RECH --> RC4["recharge"]
+    RECH --> RC5["change_mode<br/>generate_recharge_path → inactive"]
+
+    %% Completion check
+    RS --> DONE["⟳→ ReactiveSequence: mission complete?"]
+    DONE --> D1(["is_pipeline_found"])
+    DONE --> D2(["is_pipeline_inspected"])
+
+    classDef control fill:#e8eaf6,stroke:#3949ab,color:#1a237e
+    classDef condition fill:#fff8e1,stroke:#f9a825,color:#5d4037
+    classDef action fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    class R,RF,ABORT,A1,MISSION,SETUP,RS,TF,T1,T2,BF,TASKS,SEARCH,VF,V1,V2,V3,INSPECT,RECH,DONE control
+    class A0,T1a,SB,V1a,V2a,V3a,IB,D1,D2 condition
+    class A2,A3,A4,A5,SU1,SU2,T1b,T2a,T2b,V1b,V2b,V3b,S1,S2,P1,P2,P3,P4,RC1,RC2,RC3,RC4,RC5 action

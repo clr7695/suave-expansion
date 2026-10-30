@@ -152,3 +152,7 @@ dmypy.json
 .pyre/
 .config/
 **/.pytest_cache/
+
+results/
+runner/
+log/
