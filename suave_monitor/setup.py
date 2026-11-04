@@ -44,6 +44,8 @@ setup(
             'battery_monitor = suave_monitor.battery_monitor:main',
             'water_visibility_observer = '
             'suave_monitor.water_visibility_observer:main',
+            'ocean_current_monitor = '
+            'suave_monitor.ocean_current_monitor:main',
         ],
     },
 )

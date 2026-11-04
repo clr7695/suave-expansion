@@ -112,6 +112,14 @@ def generate_launch_description():
         output=print_output,
     )
 
+    ocean_current_monitor_node = Node(
+        package='suave_monitor',
+        executable='ocean_current_monitor',
+        name='ocean_current_monitor_node',
+        parameters=[mission_config],
+        output=print_output,
+    )
+
     battery_monitor_node = Node(
         package='suave_monitor',
         executable='battery_monitor',
@@ -195,6 +203,7 @@ def generate_launch_description():
         print_output_arg,
         mission_config_arg,
         water_visibility_node,
+        ocean_current_monitor_node,
         battery_monitor_node,
         pipeline_detection_wv_node,
         thruster_monitor_node,
