@@ -15,6 +15,7 @@
 #ifndef SUAVE_BT__ACTION_CHANGE_MODE_HPP_
 #define SUAVE_BT__ACTION_CHANGE_MODE_HPP_
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,12 +33,24 @@
 namespace suave_bt
 {
 
-class ChangeMode : public BT::SyncActionNode
+// Request a system_modes mode change and wait for the managed part node to
+// actually reach it. While the transition is in progress the node returns
+// RUNNING (not FAILURE), so an unfinished transition is not mistaken for a
+// failed one. FAILURE is reserved for a missing/rejecting change_mode service
+// or a transition that does not complete within `timeout` seconds.
+//
+// Set wait_for_transition="false" to get the old single-shot behavior (FAILURE
+// if the part has not settled on the first check). Use it where a RUNNING
+// result would halt a sibling action, e.g. switching spiral altitude in a
+// ReactiveSequence in front of search_pipeline.
+class ChangeMode : public BT::StatefulActionNode
 {
 public:
   ChangeMode(const std::string & name, const BT::NodeConfig & conf);
 
-  BT::NodeStatus tick() override;
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override;
 
   static BT::PortsList providedPorts()
   {
@@ -45,10 +58,24 @@ public:
       {
         BT::InputPort<std::string>("node_name"),
         BT::InputPort<std::string>("mode_name"),
+        BT::InputPort<bool>(
+          "wait_for_transition", true,
+          "Return RUNNING until the part reaches the mode (false: FAILURE instead)"),
+        BT::InputPort<double>(
+          "timeout", 10.0,
+          "Seconds to wait for the transition before returning FAILURE"),
       });
   }
 
 protected:
+  // Send the change_mode request to system_modes. Returns false if the service
+  // is unavailable, does not answer, or rejects the request.
+  bool send_change_mode_request();
+
+  // Check whether the requested transition has completed and map that to a
+  // node status, re-sending the request periodically while waiting.
+  BT::NodeStatus check_transition();
+
   // Whether `mode_name` maps the managed part node to lifecycle active
   // (fd_unground / fd_all_thrusters / inactive map it to inactive).
   static bool mode_implies_active(const std::string & mode_name);
@@ -68,6 +95,13 @@ protected:
   rclcpp::Client<system_modes_msgs::srv::ChangeMode>::SharedPtr change_mode_cli_;
   rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr get_state_cli_;
   rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr get_params_cli_;
+
+  // State of the transition currently being driven.
+  std::string requested_mode_;
+  bool wait_for_transition_{true};
+  std::chrono::duration<double> timeout_{10.0};
+  std::chrono::steady_clock::time_point start_time_;
+  std::chrono::steady_clock::time_point last_request_time_;
 };
 
 }  // namespace suave_bt

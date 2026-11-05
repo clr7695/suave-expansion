@@ -458,11 +458,14 @@ TEST_F(ActionClientTest, recover_action_mode_succeeds_when_action_succeeds)
 // _INACTIVE); pass 0 for "no get_state server". `reported_mode` is what get_mode
 // returns (unused by the new code, kept to document intent). `spiral_altitude`
 // is what the part node's get_parameters reports for the spiral sub-mode check.
-// Pass provide_change_mode=false to omit that server.
+// Pass provide_change_mode=false to omit that server. `extra_attributes` is
+// appended to the <change_mode/> element (e.g. timeout="0.2"). The node is
+// ticked until it stops returning RUNNING (for at most ~2 s).
 BT::NodeStatus run_change_mode(
   const std::string & node_name, const std::string & mode_name,
   uint8_t lifecycle_state_id, const std::string & reported_mode = "",
-  bool provide_change_mode = true, double spiral_altitude = 2.0)
+  bool provide_change_mode = true, double spiral_altitude = 2.0,
+  const std::string & extra_attributes = "")
 {
   static std::atomic<int> change_mode_index{0};
   const auto suffix = std::to_string(change_mode_index++);
@@ -524,7 +527,8 @@ BT::NodeStatus run_change_mode(
   const std::string xml =
     "<root BTCPP_format=\"4\" main_tree_to_execute=\"Main\">"
     "<BehaviorTree ID=\"Main\">"
-    "<change_mode node_name=\"" + node_name + "\" mode_name=\"" + mode_name + "\"/>"
+    "<change_mode node_name=\"" + node_name + "\" mode_name=\"" + mode_name + "\" " +
+    extra_attributes + "/>"
     "</BehaviorTree></root>";
   auto tree = factory.createTreeFromText(xml, blackboard);
 
@@ -535,13 +539,14 @@ BT::NodeStatus run_change_mode(
   std::this_thread::sleep_for(200ms);
 
   BT::NodeStatus status = BT::NodeStatus::IDLE;
-  for (int attempt = 0; attempt < 20; ++attempt) {
+  const auto deadline = std::chrono::steady_clock::now() + 2s;
+  do {
     status = tree.rootNode()->executeTick();
     if (status != BT::NodeStatus::RUNNING) {
       break;
     }
     std::this_thread::sleep_for(10ms);
-  }
+  } while (std::chrono::steady_clock::now() < deadline);
 
   executor.cancel();
   spin_thread.join();
@@ -563,13 +568,38 @@ TEST_F(ActionClientTest, change_mode_succeeds_when_part_reaches_active)
 
 // Regression: system_modes reports the target mode (get_mode == mode_name, from
 // a stale parameter default) while the part node never activated. The old code
-// returned SUCCESS on the get_mode match; change_mode must now return FAILURE.
+// returned SUCCESS on the get_mode match; change_mode must not succeed and must
+// return FAILURE once its timeout expires.
 TEST_F(ActionClientTest, change_mode_fails_when_part_never_activates)
 {
   EXPECT_EQ(
     run_change_mode(
       "f_generate_search_path", "fd_spiral_medium",
+      lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE, "fd_spiral_medium",
+      true, 2.0, "timeout=\"0.2\""),
+    BT::NodeStatus::FAILURE);
+}
+
+// While the part is still transitioning, change_mode reports RUNNING rather
+// than FAILURE (the default timeout of 10 s outlasts the 2 s tick loop).
+TEST_F(ActionClientTest, change_mode_running_while_part_not_reached)
+{
+  EXPECT_EQ(
+    run_change_mode(
+      "f_generate_search_path", "fd_spiral_medium",
       lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE, "fd_spiral_medium"),
+    BT::NodeStatus::RUNNING);
+}
+
+// wait_for_transition="false" keeps the single-shot behavior: FAILURE on the
+// first tick if the part has not reached the mode.
+TEST_F(ActionClientTest, change_mode_no_wait_fails_immediately_when_part_not_reached)
+{
+  EXPECT_EQ(
+    run_change_mode(
+      "f_generate_search_path", "fd_spiral_medium",
+      lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE, "fd_spiral_medium",
+      true, 2.0, "wait_for_transition=\"false\""),
     BT::NodeStatus::FAILURE);
 }
 
@@ -620,7 +650,7 @@ TEST_F(ActionClientTest, change_mode_fails_when_spiral_altitude_stale)
     run_change_mode(
       "f_generate_search_path", "fd_spiral_high",
       lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, "fd_spiral_high",
-      true, 2.0),
+      true, 2.0, "timeout=\"0.2\""),
     BT::NodeStatus::FAILURE);
 }
 

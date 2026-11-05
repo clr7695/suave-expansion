@@ -39,8 +39,20 @@
               <SequenceWithMemory>
                 <ReactiveSequence>
                   <battery_level threshold="0.25"/>
-                  <change_alt phase="search" search_mode="{search_mode}"/>
-                  <change_mode node_name="f_generate_search_path" mode_name="{search_mode}"/>
+                  <!-- A mode change that has not settled yet must not fail the
+                       branch (that would fall through to recharge); keep the
+                       current spiral mode and retry on the next tick.
+                       wait_for_transition="false": a RUNNING change_mode here
+                       would halt (cancel) search_pipeline on every altitude
+                       change. -->
+                  <ForceSuccess>
+                    <Sequence>
+                      <change_alt phase="search" search_mode="{search_mode}"/>
+                      <change_mode node_name="f_generate_search_path"
+                                   mode_name="{search_mode}"
+                                   wait_for_transition="false"/>
+                    </Sequence>
+                  </ForceSuccess>
                   <search_pipeline/>
                   <change_mode node_name="f_generate_search_path" mode_name="fd_unground"/>
                 </ReactiveSequence>
@@ -57,6 +69,11 @@
                 </ReactiveSequence>
               </SequenceWithMemory>
               <Sequence>
+                <!-- Only recharge when the battery is actually low, not on
+                     any other failure of the search/inspect branch. -->
+                <Inverter>
+                  <battery_level threshold="0.25"/>
+                </Inverter>
                 <change_mode node_name="f_generate_search_path"
                              mode_name="fd_unground"/>
                 <change_mode node_name="f_follow_pipeline"
@@ -95,6 +112,8 @@
             editable="true">
       <input_port name="node_name"/>
       <input_port name="mode_name"/>
+      <input_port name="wait_for_transition" default="true"/>
+      <input_port name="timeout" default="10.0"/>
     </Action>
     <Action ID="inspect_pipeline"
             editable="true"/>

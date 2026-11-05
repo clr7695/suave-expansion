@@ -80,6 +80,8 @@
             editable="true">
       <input_port name="node_name"/>
       <input_port name="mode_name"/>
+      <input_port name="wait_for_transition" default="true"/>
+      <input_port name="timeout" default="10.0"/>
     </Action>
     <Action ID="inspect_pipeline"
             editable="true"/>

@@ -22,7 +22,7 @@ using namespace std::placeholders;
 using namespace std::chrono_literals;
 
 ChangeMode::ChangeMode(const std::string & name, const BT::NodeConfig & conf)
-: BT::SyncActionNode(name, conf)
+: BT::StatefulActionNode(name, conf)
 {
   getInput("node_name", node_name_);
 
@@ -101,49 +101,104 @@ bool ChangeMode::part_in_expected_state(const std::string & mode_name)
   return std::abs(values[0].double_value - expected_altitude) < 0.01;
 }
 
-BT::NodeStatus ChangeMode::tick()
+bool ChangeMode::send_change_mode_request()
 {
-  std::string mode_name;
-  getInput("mode_name", mode_name);
-
-  // Already driven to this mode and the part node is where the mode requires
-  // it to be: nothing to do.
-  if (previous_modes_->at(node_name_) == mode_name && part_in_expected_state(mode_name)) {
-    return BT::NodeStatus::SUCCESS;
-  }
+  last_request_time_ = std::chrono::steady_clock::now();
 
   if (!change_mode_cli_->service_is_ready()) {
     RCLCPP_INFO(
       node_->get_logger(), "%s/change_mode service not available...", node_name_.c_str());
-    return BT::NodeStatus::FAILURE;
+    return false;
   }
 
   auto request = std::make_shared<system_modes_msgs::srv::ChangeMode::Request>();
-  request->mode_name = mode_name;
+  request->mode_name = requested_mode_;
   auto change_mode_future = change_mode_cli_->async_send_request(request);
-  if (change_mode_future.wait_for(1s) != std::future_status::ready ||
-    !change_mode_future.get()->success)
-  {
-    return BT::NodeStatus::FAILURE;
-  }
+  return change_mode_future.wait_for(1s) == std::future_status::ready &&
+         change_mode_future.get()->success;
+}
 
+BT::NodeStatus ChangeMode::check_transition()
+{
   // system_modes acknowledges the mode change before the underlying lifecycle
   // transition and parameter update are applied (and can drop them entirely).
   // Only report success once the part node has actually reached the required
-  // lifecycle state and spiral_altitude; otherwise fail so the tree keeps
-  // re-driving the transition.
-  if (!part_in_expected_state(mode_name)) {
+  // lifecycle state and spiral_altitude.
+  if (part_in_expected_state(requested_mode_)) {
+    RCLCPP_INFO(
+      node_->get_logger(), "Node %s mode changed to %s", node_name_.c_str(),
+      requested_mode_.c_str());
+    previous_modes_->at(node_name_) = requested_mode_;
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  if (!wait_for_transition_) {
     RCLCPP_INFO(
       node_->get_logger(),
       "%s: change_mode(%s) acknowledged but %s_node has not reached it yet",
-      node_name_.c_str(), mode_name.c_str(), node_name_.c_str());
+      node_name_.c_str(), requested_mode_.c_str(), node_name_.c_str());
     return BT::NodeStatus::FAILURE;
   }
 
+  const auto now = std::chrono::steady_clock::now();
+  if (now - start_time_ >= timeout_) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "%s: %s_node did not reach mode %s within %.1f s",
+      node_name_.c_str(), node_name_.c_str(), requested_mode_.c_str(), timeout_.count());
+    return BT::NodeStatus::FAILURE;
+  }
+
+  // system_modes can drop a request; re-send it periodically while waiting.
+  if (now - last_request_time_ >= 2s) {
+    send_change_mode_request();
+  }
+
+  return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus ChangeMode::onStart()
+{
+  getInput("mode_name", requested_mode_);
+  wait_for_transition_ = true;
+  getInput("wait_for_transition", wait_for_transition_);
+  double timeout_s = 10.0;
+  getInput("timeout", timeout_s);
+  timeout_ = std::chrono::duration<double>(timeout_s);
+
+  // Already driven to this mode and the part node is where the mode requires
+  // it to be: nothing to do.
+  if (previous_modes_->at(node_name_) == requested_mode_ &&
+    part_in_expected_state(requested_mode_))
+  {
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  start_time_ = std::chrono::steady_clock::now();
+  if (!send_change_mode_request()) {
+    return BT::NodeStatus::FAILURE;
+  }
+
+  return check_transition();
+}
+
+BT::NodeStatus ChangeMode::onRunning()
+{
+  // The target can change while waiting (e.g. mode_name="{search_mode}"):
+  // start over and drive the new mode instead.
+  std::string mode_name;
+  getInput("mode_name", mode_name);
+  if (mode_name != requested_mode_) {
+    return onStart();
+  }
+
+  return check_transition();
+}
+
+void ChangeMode::onHalted()
+{
   RCLCPP_INFO(
-    node_->get_logger(), "Node %s mode changed to %s", node_name_.c_str(),
-    mode_name.c_str());
-  previous_modes_->at(node_name_) = mode_name;
-  return BT::NodeStatus::SUCCESS;
+    node_->get_logger(), "%s: change_mode(%s) halted before the transition completed",
+    node_name_.c_str(), requested_mode_.c_str());
 }
 }  // namespace suave_bt
