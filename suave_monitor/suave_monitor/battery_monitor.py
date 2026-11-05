@@ -36,7 +36,7 @@ class BatteryMonitor(Node):
         super().__init__('battery_monitor')
 
         self.declare_parameter('qa_publishing_period', 1.0)
-        self.declare_parameter('discharge_time', 50.0)
+        self.declare_parameter('discharge_time', 100.0)
 
         self.qa_publishing_period = self.get_parameter(
             'qa_publishing_period').value
