@@ -69,6 +69,17 @@ def test_publishes_strength_and_direction_on_construction(monitor):
     assert not node.qa_publisher_timer.is_canceled()
 
 
+def test_publishes_current_state_to_terminal(monitor, monkeypatch):
+    node, _, _ = monitor
+    logger = Mock()
+    monkeypatch.setattr(node, 'get_logger', lambda: logger)
+
+    node.qa_publisher_cb()
+
+    logger.info.assert_called_once_with(
+        'Ocean current: strength=1.000, direction=0.0 degrees')
+
+
 def test_current_schedule_starts_at_guided(monitor):
     node, publisher, clock = monitor
     node.set_parameters([

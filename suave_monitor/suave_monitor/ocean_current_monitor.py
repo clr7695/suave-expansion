@@ -49,7 +49,7 @@ class OceanCurrentMonitor(Node):
 
         self.diagnostics_publisher = self.create_publisher(
             DiagnosticArray, '/diagnostics', 10)
-        
+
         self.mavros_state_sub = self.create_subscription(
             State, 'mavros/state', self.status_cb, 10)
 
@@ -64,7 +64,6 @@ class OceanCurrentMonitor(Node):
             self.initial_time = self.get_clock().now().to_msg().sec
             self.destroy_subscription(self.mavros_state_sub)
 
-# Helper function to make the publisher method a bit cleaner. 
     def calculate_sinusoidal_value(self, prefix, current_time):
         """Calculate a bounded sinusoidal parameter value."""
         period = self.get_parameter(prefix + '_period').value
@@ -83,6 +82,8 @@ class OceanCurrentMonitor(Node):
         current_time = self.get_clock().now().to_msg().sec
         strength = self.calculate_sinusoidal_value('current_strength', current_time)
         direction = self.calculate_sinusoidal_value('current_direction', current_time) % 360.0
+
+        self.get_logger().info('Ocean current: strength={:.3f}, direction={:.1f} degrees'.format(strength, direction))
 
         strength_value = KeyValue()
         strength_value.key = 'current_strength'
