@@ -40,6 +40,8 @@
 #include "suave_bt/action_recover_thrusters.hpp"
 #include "suave_bt/action_inspect_pipeline.hpp"
 #include "suave_bt/action_change_mode.hpp"
+#include "suave_bt/action_change_alt.hpp"
+
 
 int main(int argc, char * argv[])
 {
@@ -59,6 +61,8 @@ int main(int argc, char * argv[])
   factory.registerNodeType<suave_bt::ArmThrusters>("arm_thrusters");
   factory.registerNodeType<suave_bt::SetGuidedMode>("set_guided_mode");
   factory.registerNodeType<suave_bt::ChangeMode>("change_mode");
+  factory.registerNodeType<suave_bt::ChangeAlt>("change_alt");
+
 
   factory.registerNodeType<suave_bt::WaterVisibility>("water_visibility");
   factory.registerNodeType<suave_bt::ThrustersOk>("thrusters_ok");

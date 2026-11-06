@@ -1,0 +1,135 @@
+---
+title: suave_bt class diagram (BehaviorTree.CPP managing subsystem)
+---
+classDiagram
+    direction TB
+
+    class rclcpp_Node["rclcpp::Node"]
+    class StatefulActionNode["BT::StatefulActionNode"] {
+        <<external>>
+        +onStart() NodeStatus
+        +onRunning() NodeStatus
+        +onHalted()
+    }
+    class SyncActionNode["BT::SyncActionNode"] {
+        <<external>>
+        +tick() NodeStatus
+    }
+    class ConditionNode["BT::ConditionNode"] {
+        <<external>>
+        +tick() NodeStatus
+    }
+
+    class SuaveMission {
+        -start_time_ : Time
+        -search_started_ : bool
+        -time_limit_ : int
+        -use_action_server_ : bool
+        -mission_aborted_ : bool
+        -save_mission_results_cli
+        -time_limit_timer_
+        +time_limit_reached() bool
+        +set_search_started()
+        +is_mission_aborted() bool
+        +use_action_server() bool
+        +finish_mission()
+        -time_limit_cb()
+        -request_save_mission_results() bool
+    }
+    rclcpp_Node <|-- SuaveMission
+
+    class BtActionClient~ActionT~ {
+        <<template>>
+        #node_ : SuaveMission
+        -action_client_
+        -goal_handle_
+        -result_ : optional~WrappedResult~
+        -action_mutex_
+        -generation_ : size_t
+        +onStart() NodeStatus
+        +onRunning() NodeStatus
+        +onHalted()
+        #makeGoal()* Goal
+        #evaluateResult(result)* NodeStatus
+        #onStartRequested()
+        #onLegacyStart() NodeStatus
+        #onLegacyRunning() NodeStatus
+        #onLegacyHalted()
+        -sendGoal()
+        -requestGoalCancellation()
+    }
+    StatefulActionNode <|-- BtActionClient
+
+    class SearchPipeline {
+        action: SpiralSearch
+        -pipeline_detected_ : bool
+        #onStartRequested()
+    }
+    class InspectPipeline {
+        action: FollowPipeline
+        -pipeline_inspected_ : bool
+    }
+    class RechargeBattery {
+        action: RechargeBattery
+        -recharged_ : bool
+    }
+    class RecoverThrusters {
+        action: RecoverThrusters
+    }
+    BtActionClient <|-- SearchPipeline
+    BtActionClient <|-- InspectPipeline
+    BtActionClient <|-- RechargeBattery
+    BtActionClient <|-- RecoverThrusters
+
+    class ArmThrusters {
+        -arm_motors_cli_ : CommandBool
+        +onRunning() NodeStatus
+    }
+    class SetGuidedMode {
+        -mode_ : string
+        -set_guided_cli_ : SetMode
+        -mavros_state_sub_
+        +onRunning() NodeStatus
+    }
+    StatefulActionNode <|-- ArmThrusters
+    StatefulActionNode <|-- SetGuidedMode
+
+    class ChangeMode {
+        -node_name_ : string
+        -previous_modes_ : map~string,string~
+        -change_mode_cli_
+        -get_state_cli_
+        -get_params_cli_
+        +tick() NodeStatus
+        -mode_implies_active(mode)$ bool
+        -part_in_expected_state(mode) bool
+    }
+    SyncActionNode <|-- ChangeMode
+
+    class WaterVisibility {
+        -water_visibility_ : float
+        +tick() NodeStatus
+    }
+    class BatteryLevel {
+        -battery_level_ : float
+        +tick() NodeStatus
+    }
+    class ThrustersOk {
+        -thrusters_ok_ : map~string,bool~
+        +tick() NodeStatus
+    }
+    class IsPipelineFound {
+        -_pipeline_detected : bool
+        +tick() NodeStatus
+    }
+    class IsPipelineInspected {
+        -_pipeline_inspected : bool
+        +tick() NodeStatus
+    }
+    ConditionNode <|-- WaterVisibility
+    ConditionNode <|-- BatteryLevel
+    ConditionNode <|-- ThrustersOk
+    ConditionNode <|-- IsPipelineFound
+    ConditionNode <|-- IsPipelineInspected
+
+    note for SuaveMission "Shared via blackboard key 'node'.<br/>Every BT leaf reads it in its constructor<br/>and uses it to create its ROS clients and subscriptions."

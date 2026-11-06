@@ -18,6 +18,20 @@
     water_visibility_max: 3.75 # Maximum value for water visibility
     water_visibility_sec_shift: 0.0 # Water visibility seconds shift to left
 
+
+# Current Monitoring Subsystem
+/ocean_current_monitor_node:
+  ros__parameters:
+    qa_publishing_period: 1.0 # Ocean current measurements published every second
+    current_strength_period: 150 # Current strength has a 150 second sinusoidal period
+    current_strength_min: 0.0 # Minimum simulated current
+    current_strength_max: 1.0 # Maximum simulated current
+    current_strength_sec_shift: 0.0
+    current_direction_period: 150 # Current direction has a 150 second sinusoidal period
+    current_direction_min: 0.0 # Minimum current direction is 0 degrees
+    current_direction_max: 360.0 # Maximum current direction is 0 degrees
+    current_direction_sec_shift: 0.0
+
 /thruster_monitor:
   ros__parameters:
     thruster_events: # Thruster events, format: (thruster number (1 to 6), failure or recovery, delta time in seconds(from the last event))
@@ -26,4 +40,3 @@
 /task_bridge:
   ros__parameters:
     adapt_period: 30 # Period to perform random adaptation in seconds
-
